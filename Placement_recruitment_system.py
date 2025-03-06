@@ -1,5 +1,56 @@
+import sqlite3
+
+class Database:
+    def __init__(self, db_name="candidates.db"):
+        self.connection = sqlite3.connect(db_name)
+        self.create_tables()
+
+    def create_tables(self):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS candidates (
+                id INTEGER PRIMARY KEY,
+                name TEXT,
+                gpa REAL,
+                experience INTEGER,
+                skills TEXT,
+                coding_marks REAL
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS interview_slots (
+                time TEXT PRIMARY KEY,
+                candidate_id INTEGER,
+                FOREIGN KEY (candidate_id) REFERENCES candidates (id)
+            )
+        """)
+        self.connection.commit()
+
+    def add_candidate(self, candidate):
+        cursor = self.connection.cursor()
+        cursor.execute("""
+            INSERT INTO candidates (id, name, gpa, experience, skills, coding_marks)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (candidate.id, candidate.name, candidate.gpa, candidate.experience, ",".join(candidate.skills), candidate.coding_marks))
+        self.connection.commit()
+
+    def delete_candidate(self, candidate_id):
+        cursor = self.connection.cursor()
+        cursor.execute("DELETE FROM candidates WHERE id = ?", (candidate_id,))
+        self.connection.commit()
+
+    def get_candidate_by_id(self, candidate_id):
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT * FROM candidates WHERE id = ?", (candidate_id,))
+        return cursor.fetchone()
+
+    def get_candidates_by_gpa(self, gpa):
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT * FROM candidates WHERE gpa = ?", (gpa,))
+        return cursor.fetchall()
+
 class Candidate:
-    def _init_(self, id, name, gpa, experience, skills, coding_marks):
+    def __init__(self, id, name, gpa, experience, skills, coding_marks):
         self.id = id
         self.name = name
         self.gpa = gpa
@@ -8,12 +59,12 @@ class Candidate:
         self.coding_marks = coding_marks
 
 class ListNode:
-    def _init_(self, candidate):
+    def __init__(self, candidate):
         self.candidate = candidate
         self.next = None
 
 class LinkedList:
-    def _init_(self):
+    def __init__(self):
         self.head = None
 
     def insert(self, candidate):
@@ -26,21 +77,21 @@ class LinkedList:
                 current = current.next
             current.next = new_node
 
-    def _iter_(self):
+    def __iter__(self):
         current = self.head
         while current:
             yield current.candidate
             current = current.next
 
 class BSTNode:
-    def _init_(self, gpa):
+    def __init__(self, gpa):
         self.gpa = gpa
         self.linked_list = LinkedList()
         self.left = None
         self.right = None
 
 class BST:
-    def _init_(self):
+    def __init__(self):
         self.root = None
 
     def insert(self, candidate):
@@ -88,12 +139,12 @@ class BST:
             self._in_order_traversal(node.right, nodes)
 
 class InterviewSlot:
-    def _init_(self, time, candidate=None):
+    def __init__(self, time, candidate=None):
         self.time = time
         self.candidate = candidate
 
 class Scheduler:
-    def _init_(self):
+    def __init__(self):
         self.slots = []
 
     def add_slot(self, time):
@@ -110,14 +161,35 @@ class Scheduler:
         return [(slot.time, slot.candidate.name if slot.candidate else "Free") for slot in self.slots]
 
 class CandidateSelectionSystem:
-    def _init_(self):
+    def __init__(self):
         self.bst = BST()
         self.scheduler = Scheduler()
+        self.db = Database()
         self.hash_table = {}
+        self._load_candidates_from_db()  
+
+    def _load_candidates_from_db(self):
+        cursor = self.db.connection.cursor()
+        cursor.execute("SELECT * FROM candidates")
+        for row in cursor.fetchall():
+            id, name, gpa, experience, skills, coding_marks = row
+            skills_list = skills.split(",") 
+            candidate = Candidate(id, name, gpa, experience, skills_list, coding_marks)
+            self.bst.insert(candidate)
+            self.hash_table[candidate.id] = candidate
 
     def add_candidate(self, candidate):
         self.bst.insert(candidate)
         self.hash_table[candidate.id] = candidate
+        self.db.add_candidate(candidate)
+
+    def delete_candidate(self, candidate_id):
+        if candidate_id in self.hash_table:
+            del self.hash_table[candidate_id]
+            self.db.delete_candidate(candidate_id)
+            print(f"Candidate with ID {candidate_id} deleted successfully.")
+        else:
+            print("Candidate not found.")
 
     def search_candidate_by_id(self, candidate_id):
         return self.hash_table.get(candidate_id, None)
@@ -149,22 +221,29 @@ class CandidateSelectionSystem:
         return shortlisted
 
     def filter_candidates_by_coding_marks(self, min_marks):
-        filtered = []
-        for candidate in self.hash_table.values():
-            if candidate.coding_marks >= min_marks:
-                filtered.append(candidate)
-        return filtered
+        return [candidate for candidate in self.hash_table.values() if candidate.coding_marks >= min_marks]
+
+    def schedule_candidate(self, time, candidate_id):
+        candidate = self.search_candidate_by_id(candidate_id)
+        if candidate:
+            self.scheduler.add_slot(time)
+            return self.scheduler.schedule_candidate(time, candidate)
+        return False
+
+    def get_schedule(self):
+        return self.scheduler.get_schedule()
 
     def generate_report(self):
-        report = {}
-        report['total_candidates'] = len(self.hash_table)
-        report['shortlisted_candidates'] = len(self.shortlist_candidates(3.5, ['Python', 'Data Structures'], 2, 75))
-        report['all_candidates'] = [(candidate.id, candidate.name, candidate.gpa, candidate.experience, candidate.skills, candidate.coding_marks) for candidate in self.hash_table.values()]
+        report = {
+            "total_candidates": len(self.hash_table),
+            "shortlisted_candidates": len(self.shortlist_candidates(3.5, ['Python', 'Data Structures'], 2, 75)),
+            "all_candidates": [(candidate.id, candidate.name, candidate.gpa, candidate.experience, candidate.skills, candidate.coding_marks) for candidate in self.hash_table.values()]
+        }
         return report
 
 def main():
     system = CandidateSelectionSystem()
-    
+
     while True:
         print("\nCandidate Selection System Menu")
         print("1. Add Candidate")
@@ -176,7 +255,8 @@ def main():
         print("7. Schedule Interview")
         print("8. View Schedule")
         print("9. Generate All Candidate Details")
-        print("10. Exit")
+        print("10. Delete Candidate") 
+        print("11. Exit")  
 
         choice = input("Enter your choice: ")
 
@@ -195,7 +275,9 @@ def main():
             id = int(input("Enter ID: "))
             candidate = system.search_candidate_by_id(id)
             if candidate:
-                print(f"ID: {candidate.id}, Name: {candidate.name}, GPA: {candidate.gpa}, Experience: {candidate.experience}, Skills: {', '.join(candidate.skills)}, Coding Marks: {candidate.coding_marks}")
+                print(f"ID: {candidate.id}, Name: {candidate.name}, GPA: {candidate.gpa}, "
+                      f"Experience: {candidate.experience}, Skills: {', '.join(candidate.skills)}, "
+                      f"Coding Marks: {candidate.coding_marks}")
             else:
                 print("Candidate not found.")
 
@@ -204,7 +286,9 @@ def main():
             candidates = system.search_candidate_by_gpa(gpa)
             if candidates:
                 for candidate in candidates:
-                    print(f"ID: {candidate.id}, Name: {candidate.name}, GPA: {candidate.gpa}, Experience: {candidate.experience}, Skills: {', '.join(candidate.skills)}, Coding Marks: {candidate.coding_marks}")
+                    print(f"ID: {candidate.id}, Name: {candidate.name}, GPA: {candidate.gpa}, "
+                          f"Experience: {candidate.experience}, Skills: {', '.join(candidate.skills)}, "
+                          f"Coding Marks: {candidate.coding_marks}")
             else:
                 print("No candidates found with the specified GPA.")
 
@@ -221,9 +305,12 @@ def main():
             min_coding_marks = float(input("Enter minimum coding test marks: "))
             shortlisted = system.shortlist_candidates(min_gpa, required_skills, min_experience, min_coding_marks)
             if shortlisted:
-                print(f"*Shortlisted candidates with min GPA {min_gpa}, skills {required_skills}, min experience {min_experience}, and min coding test marks {min_coding_marks}*:")
+                print(f"*Shortlisted candidates with min GPA {min_gpa}, skills {required_skills}, "
+                      f"min experience {min_experience}, and min coding test marks {min_coding_marks}*:")
                 for candidate in shortlisted:
-                    print(f"ID: {candidate.id}, Name: {candidate.name}, GPA: {candidate.gpa}, Experience: {candidate.experience}, Skills: {', '.join(candidate.skills)}, Coding Marks: {candidate.coding_marks}")
+                    print(f"ID: {candidate.id}, Name: {candidate.name}, GPA: {candidate.gpa}, "
+                          f"Experience: {candidate.experience}, Skills: {', '.join(candidate.skills)}, "
+                          f"Coding Marks: {candidate.coding_marks}")
             else:
                 print("No candidates matched the criteria.")
 
@@ -233,7 +320,9 @@ def main():
             if filtered:
                 print(f"Candidates with coding test marks >= {min_marks}:")
                 for candidate in filtered:
-                    print(f"ID: {candidate.id}, Name: {candidate.name}, GPA: {candidate.gpa}, Experience: {candidate.experience}, Skills: {', '.join(candidate.skills)}, Coding Marks: {candidate.coding_marks}")
+                    print(f"ID: {candidate.id}, Name: {candidate.name}, GPA: {candidate.gpa}, "
+                          f"Experience: {candidate.experience}, Skills: {', '.join(candidate.skills)}, "
+                          f"Coding Marks: {candidate.coding_marks}")
             else:
                 print("No candidates found with the specified coding test marks.")
 
@@ -263,14 +352,19 @@ def main():
             print(f"Shortlisted candidates: {report['shortlisted_candidates']}")
             print("Details of all candidates:")
             for candidate in report['all_candidates']:
-                print(f"ID: {candidate[0]}, Name: {candidate[1]}, GPA: {candidate[2]}, Experience: {candidate[3]}, Skills: {', '.join(candidate[4])}, Coding Marks: {candidate[5]}")
-
+                print(f"ID: {candidate[0]}, Name: {candidate[1]}, GPA: {candidate[2]}, "
+                      f"Experience: {candidate[3]}, Skills: {candidate[4]}, Coding Marks: {candidate[5]}")
+                
         elif choice == "10":
+            id = int(input("Enter candidate ID to delete: "))
+            system.delete_candidate(id)  
+
+        elif choice == "11":
             print("Exiting the system.")
             break
 
         else:
             print("Invalid choice. Please try again.")
 
-if __name__ == "_main_":
+if __name__ == "__main__":
     main()
